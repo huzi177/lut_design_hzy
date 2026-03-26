@@ -1,0 +1,55 @@
+name: Dependencies Bump
+on:
+  schedule:
+    # Run this job everyday at 5:30 AM UTC+8
+    - cron:  '30 21 * * *'
+  workflow_dispatch:
+
+jobs:
+  bump-deps:
+    name: "Bump Chisel and CIRCT"
+    if: ${{ !cancelled() }}
+    runs-on: [self-hosted, linux, nixos]
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: ./templates/chisel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: master
+      - name: Bump nixpkgs
+        run: |
+          nix flake update 
+      - name: Bump Chisel and CIRCT
+        run: |
+          cd nix/dependencies
+          nix run '.#nvfetcher' -- -f '[(^chisel$)(^zaozi$)]'
+      - name: Bump all mill deps
+        run: |
+          mkdir -p nix/dependencies/locks
+          printf '%s\n' "gcd.dependencies.ivy-chisel.bump" "gcd.dependencies.ivy-omlib.bump" "gcd.gcd-compiled.bump" | xargs -I% nix run ".#%" -j auto -- --force
+      - name: Commit changes
+        env:
+          GH_TOKEN: ${{ secrets.CI_BUMP_TOKEN }}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          currentDate=$(date +%F)
+          branch="dependencies-bumping-$currentDate"
+          git checkout -b "$branch"
+
+          git add 'nix/dependencies'
+          git add 'flake.lock'
+
+          if ! git diff --quiet --cached --exit-code; then
+            updatedFiles=$(git diff --cached --name-only)
+            echo "File changed"
+            git commit -m "[deps] Bump dependencies"
+            git push origin "$branch" --force-with-lease
+            nix run '.#gh' -- \
+              pr create --title "Bump dependencies" --body "Updated: $updatedFiles"
+          fi

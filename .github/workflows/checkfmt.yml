@@ -1,0 +1,35 @@
+name: Check the format of a PR
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+env:
+  USER: runner
+
+# Cancel the current workflow when new commit pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+
+  check-format:
+    name: "Check format"
+    runs-on: [self-hosted, linux, nixos]
+    strategy:
+      fail-fast: false
+    defaults:
+      run:
+        working-directory: ./templates/chisel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: "Check format"
+        if: "!cancelled()"
+        run: |
+          nix fmt -- --fail-on-change
